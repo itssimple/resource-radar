@@ -4,6 +4,7 @@ using BepInEx.Logging;
 using HarmonyLib;
 using SpaceCraft;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.InputForUI;
@@ -43,23 +44,63 @@ namespace ResourceRadar
         private readonly Dictionary<string, Color> _resourceColors = new Dictionary<string, Color>
         {
             { "Aluminium", new Color(0.7f, 0.7f, 0.8f) }, // Dull grey
+            { "Bauxite", new Color(0.769f, 0.271f, 0) },
+            { "Blazar Quartz", new Color(0, 0.678f, 1) },
             { "Cobalt", Color.blue },
+            { "Cosmic Quartz", new Color(1, 0, 0.561f) },
+            { "Dolomite", new Color(0.859f, 0.859f, 0.859f) },
             { "Ice", Color.cyan },
             { "Iridium", new Color(1f, 0.5f, 0f) }, // Orange
             { "Iron", Color.grey },
             { "Magnesium", new Color(0.9f, 0.9f, 1f) }, // Pale white
+            { "Magnetar Quartz", new Color(0.643f, 0, 1) },
             { "Obsidian", new Color(0.412f, 0, 0.318f) },
             { "Osmium", new Color(0.6f, 0.2f, 0.8f) }, // Purple
             { "Phosphorus", new Color(0.69f, 0.957f, 1f) },
+            { "Pulsar Quartz", new Color(1f, 0f, 1f) },
+            { "Pulsar Shard", new Color(1f, 0f, 1f) },
+            { "Quasar Quartz", new Color(0, 1, 0.259f) },
             { "Selenium", new Color(0.294f, 0.459f, 0.369f) },
             { "Silicon", new Color(0.8f, 0.7f, 0.6f) }, // Sandy color
+            { "Solar Quartz", new Color(0.988f, 1f, 0f) },
             { "Sulphur", Color.yellow },
-            { "Super Alloy", new Color(0.957f, 0, 1f) },
+            { "Super Alloy", new Color(0.7f, 0, 1f) },
             { "Titanium", Color.white },
             { "Uranium", Color.green },
+            { "Uraninite", new Color(0.929f, 1, 0.949f) },
             { "Zeolite", new Color(0.3f, 0.8f, 0.4f) }, // Dark green
         };
-        // We now need to store the color along with the position
+
+        private readonly Dictionary<string, List<string>> _resourceGroups = new Dictionary<string, List<string>>
+        {
+            { "Aluminium", new List<string> { "Aluminium" } },
+            { "Bauxite", new List<string> { "Bauxite" } },
+            { "Blazar Quartz", new List<string> { "BlazarQuartz", "BalzarQuartz" } },
+            { "Cobalt", new List<string> { "Cobalt" } },
+            { "Cosmic Quartz", new List<string> { "CosmicQuartz" } },
+            { "Dolomite", new List<string> { "Dolomite" } },
+            { "Ice", new List<string> { "Ice" } },
+            { "Iridium", new List<string> { "Iridium" } },
+            { "Iron", new List<string> { "Iron" } },
+            { "Magnesium", new List<string> { "Magnesium" } },
+            { "Magnetar Quartz", new List<string> { "MagnetarQuartz" } },
+            { "Obsidian", new List<string> { "Obsidian" } },
+            { "Osmium", new List<string> { "Osmium" } },
+            { "Phosphorus", new List<string> { "Phosphorus" } },
+            { "Pulsar Quartz", new List<string> { "PulsarQuartz" } },
+            { "Pulsar Shard", new List<string> { "PulsarShard" } },
+            { "Quasar Quartz", new List<string> { "QuasarQuartz" } },
+            { "Selenium", new List<string> { "Selenium" } },
+            { "Silicon", new List<string> { "Silicon" } },
+            { "Solar Quartz", new List<string> { "SolarQuartz" } },
+            { "Sulphur", new List<string> { "Sulphur", "Sulfur" } },
+            { "Super Alloy", new List<string> { "SuperAlloy", "Alloy" } },
+            { "Titanium", new List<string> { "Titanium" } },
+            { "Uranium", new List<string> { "Uranium", "Uranim" } },
+            { "Uraninite", new List<string> { "Uraninite" } },
+            { "Zeolite", new List<string> { "Zeolite" } }
+        };
+
         private readonly List<RadarBlip> _blipsToDraw = new List<RadarBlip>();
 
         private Texture2D _blipTexture;
@@ -164,9 +205,14 @@ namespace ResourceRadar
                         continue; // Skip if we're in specific mode and this isn't the target resource
                     }
 
-                    if (groupId.StartsWith(targetResource.Key, System.StringComparison.InvariantCultureIgnoreCase))
+                    var variations = _resourceGroups.GetValueOrDefault(targetResource.Key, []);
+
+                    if (variations.Any(v => groupId.StartsWith(v, System.StringComparison.InvariantCultureIgnoreCase)))
                     {
                         var objectPosition = worldObject.GetPosition();
+
+                        if (worldObject.GetGameObject()?.hideFlags == HideFlags.HideAndDontSave)
+                            continue;
 
                         _blipsToDraw.Add(new RadarBlip
                         {
