@@ -198,12 +198,29 @@ namespace ResourceRadar
                 return;
             }
 
-            if (oncePerFrame && Keyboard.current[Key.F7].wasPressedThisFrame && _currentMode == RadarMode.Specific)
+            if (oncePerFrame && Keyboard.current[Key.PageUp].wasPressedThisFrame && _currentMode == RadarMode.Specific)
             {
                 // Cycle through specific resources
                 var resourceKeys = new List<string>(_resourceColors.Keys);
                 int currentIndex = resourceKeys.IndexOf(_currentSpecificResource);
                 currentIndex = (currentIndex + 1) % resourceKeys.Count; // Loop back to the start
+                _currentSpecificResource = resourceKeys[currentIndex];
+                // Force a rescan immediately to reflect the change
+                ScanForResources();
+                return;
+            }
+
+            if (oncePerFrame && Keyboard.current[Key.PageDown].wasPressedThisFrame && _currentMode == RadarMode.Specific)
+            {
+                // Cycle through specific resources
+                var resourceKeys = new List<string>(_resourceColors.Keys);
+                int currentIndex = resourceKeys.IndexOf(_currentSpecificResource);
+                currentIndex--;
+                if (currentIndex < 0)
+                {
+                    currentIndex = resourceKeys.Count - 1;
+                }
+
                 _currentSpecificResource = resourceKeys[currentIndex];
                 // Force a rescan immediately to reflect the change
                 ScanForResources();
@@ -227,7 +244,7 @@ namespace ResourceRadar
                 return; // Skip rendering if player is not available or radar is disabled
             }
 
-            string modeText = $"Mode: {_currentMode} (F6){(_currentMode == RadarMode.Specific ? $" Resource: {_currentSpecificResource} (F7)" : "")}";
+            string modeText = $"Mode: {_currentMode} (F6){(_currentMode == RadarMode.Specific ? $" Resource: {_currentSpecificResource} (PgUp/PgDn)" : "")}";
             // , Last update: {_timeSinceLastScan} seconds ago
             GUI.color = Color.white;
             // Position the text just above the radar widget
