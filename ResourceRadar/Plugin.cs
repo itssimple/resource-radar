@@ -54,7 +54,7 @@ namespace ResourceRadar
             { "Selenium", new Color(0.294f, 0.459f, 0.369f) },
             { "Silicon", new Color(0.8f, 0.7f, 0.6f) }, // Sandy color
             { "Sulphur", Color.yellow },
-            { "Super Allow", new Color(0.957f, 0, 1f) },
+            { "Super Alloy", new Color(0.957f, 0, 1f) },
             { "Titanium", Color.white },
             { "Uranium", Color.green },
             { "Zeolite", new Color(0.3f, 0.8f, 0.4f) }, // Dark green
