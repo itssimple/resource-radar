@@ -42,17 +42,21 @@ namespace ResourceRadar
 
         private readonly Dictionary<string, Color> _resourceColors = new Dictionary<string, Color>
         {
-            { "Iron", Color.grey },
-            { "Cobalt", Color.blue },
-            { "Silicon", new Color(0.8f, 0.7f, 0.6f) }, // Sandy color
-            { "Titanium", Color.white },
-            { "Magnesium", new Color(0.9f, 0.9f, 1f) }, // Pale white
             { "Aluminium", new Color(0.7f, 0.7f, 0.8f) }, // Dull grey
+            { "Cobalt", Color.blue },
             { "Ice", Color.cyan },
-            { "Uranium", Color.green },
             { "Iridium", new Color(1f, 0.5f, 0f) }, // Orange
-            { "Sulphur", Color.yellow },
+            { "Iron", Color.grey },
+            { "Magnesium", new Color(0.9f, 0.9f, 1f) }, // Pale white
+            { "Obsidian", new Color(0.412f, 0, 0.318f) },
             { "Osmium", new Color(0.6f, 0.2f, 0.8f) }, // Purple
+            { "Phosphorus", new Color(0.69f, 0.957f, 1f) },
+            { "Selenium", new Color(0.294f, 0.459f, 0.369f) },
+            { "Silicon", new Color(0.8f, 0.7f, 0.6f) }, // Sandy color
+            { "Sulphur", Color.yellow },
+            { "Super Allow", new Color(0.957f, 0, 1f) },
+            { "Titanium", Color.white },
+            { "Uranium", Color.green },
             { "Zeolite", new Color(0.3f, 0.8f, 0.4f) }, // Dark green
         };
         // We now need to store the color along with the position
@@ -84,8 +88,6 @@ namespace ResourceRadar
             Harmony.CreateAndPatchAll(typeof(Plugin), PluginInfo.PLUGIN_GUID);
         }
 
-        private static bool _isGameReady = false;
-
         [HarmonyPostfix]
         [HarmonyPatch(typeof(PlanetLoader), "HandleDataAfterLoad")]
         static void Patch_PlanetLoader_HandleDataAfterLoad(PlanetLoader __instance)
@@ -97,7 +99,6 @@ namespace ResourceRadar
         {
             while (!__instance.GetIsLoaded())
             {
-                _isGameReady = false;
                 yield return null; // Wait for the procedural instances to be initialized
             }
             // Here you can add logic to handle the procedural instances
@@ -105,8 +106,6 @@ namespace ResourceRadar
 
             logger.LogInfo("Procedural instances are ready.");
             radarEnabled.Value = true; // Enable radar by default after loading
-
-            _isGameReady = true;
         }
 
         void Update()
@@ -141,8 +140,6 @@ namespace ResourceRadar
                     _blipsToDraw.Clear();
                 }
 
-                _isGameReady = false;
-
                 return;
             }
 
@@ -171,15 +168,12 @@ namespace ResourceRadar
                     {
                         var objectPosition = worldObject.GetPosition();
 
-                        if (Vector3.Distance(Camera.main.transform.position, objectPosition) <= radarRange.Value)
+                        _blipsToDraw.Add(new RadarBlip
                         {
-                            _blipsToDraw.Add(new RadarBlip
-                            {
-                                position = objectPosition,
-                                color = targetResource.Value
-                            });
-                            break;
-                        }
+                            position = objectPosition,
+                            color = targetResource.Value
+                        });
+                        break;
                     }
                 }
             }
@@ -221,21 +215,20 @@ namespace ResourceRadar
                 return; // Skip GUI rendering if the mod is disabled
             }
 
-            if (!_isGameReady)
-                return;
-
             Color originalColor = GUI.color;
 
             // Define the radar's screen position
             _radarRect = new Rect(Screen.width - (_radarSize * 1.5f) - 10, Screen.height - (_radarSize * 3) - 10, _radarSize, _radarSize);
             _radarCenter = new Vector2(_radarRect.x + _radarSize / 2, _radarRect.y + _radarSize / 2);
 
-
-            Camera playerCamera = Camera.main;
-            if (playerCamera == null)
-                return;
+            var player = Managers.GetManager<PlayersManager>()?.GetActivePlayerController();
+            if (player == null || !radarEnabled.Value)
+            {
+                return; // Skip rendering if player is not available or radar is disabled
+            }
 
             string modeText = $"Mode: {_currentMode} (F6){(_currentMode == RadarMode.Specific ? $" Resource: {_currentSpecificResource} (F7)" : "")}";
+            // , Last update: {_timeSinceLastScan} seconds ago
             GUI.color = Color.white;
             // Position the text just above the radar widget
             GUI.Label(new Rect(_radarRect.x, _radarRect.y - 20, _radarSize, 20), modeText, new GUIStyle()
@@ -251,12 +244,12 @@ namespace ResourceRadar
             // Draw the resource blips
             foreach (var blip in _blipsToDraw)
             {
-                float distance = Vector3.Distance(playerCamera.transform.position, blip.position);
+                float distance = Vector3.Distance(player.transform.position, blip.position);
 
                 // Only process blips within the radar's range
                 if (distance < radarRange.Value)
                 {
-                    DrawBlip(playerCamera.transform, blip.position, blip.color);
+                    DrawBlip(player.transform, blip.position, blip.color);
                 }
             }
 
@@ -275,7 +268,7 @@ namespace ResourceRadar
         void DrawRadarGrid()
         {
             GUI.color = new Color(1, 1, 1, 0.3f); // Faint white
-                                                  // Horizontal line
+            // Horizontal line
             GUI.DrawTexture(new Rect(_radarRect.x, _radarCenter.y, _radarSize, 1), _blipTexture);
             // Vertical line
             GUI.DrawTexture(new Rect(_radarCenter.x, _radarRect.y, 1, _radarSize), _blipTexture);
