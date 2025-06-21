@@ -211,7 +211,7 @@ namespace ResourceRadar
                     {
                         var objectPosition = worldObject.GetPosition();
 
-                        if (worldObject.GetGameObject()?.hideFlags == HideFlags.HideAndDontSave)
+                        if (!worldObject.GetIsPlaced())
                             continue;
 
                         _blipsToDraw.Add(new RadarBlip
