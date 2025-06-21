@@ -244,7 +244,7 @@ namespace ResourceRadar
                 return;
             }
 
-            if (oncePerFrame && Keyboard.current[Key.PageUp].wasPressedThisFrame && _currentMode == RadarMode.Specific)
+            if (oncePerFrame && Keyboard.current[Key.PageDown].wasPressedThisFrame && _currentMode == RadarMode.Specific)
             {
                 // Cycle through specific resources
                 var resourceKeys = new List<string>(_resourceColors.Keys);
@@ -256,7 +256,7 @@ namespace ResourceRadar
                 return;
             }
 
-            if (oncePerFrame && Keyboard.current[Key.PageDown].wasPressedThisFrame && _currentMode == RadarMode.Specific)
+            if (oncePerFrame && Keyboard.current[Key.PageUp].wasPressedThisFrame && _currentMode == RadarMode.Specific)
             {
                 // Cycle through specific resources
                 var resourceKeys = new List<string>(_resourceColors.Keys);
