@@ -1,0 +1,325 @@
+﻿using BepInEx;
+using BepInEx.Configuration;
+using BepInEx.Logging;
+using HarmonyLib;
+using SpaceCraft;
+using System.Collections.Generic;
+using System.Text.RegularExpressions;
+using UnityEngine;
+using UnityEngine.InputForUI;
+using UnityEngine.InputSystem;
+
+namespace ResourceRadar
+{
+    [BepInPlugin("nolifeking85.theplanetcraftermods.featresourceradar", "(Feat) Resource Radar", PluginInfo.PLUGIN_VERSION)]
+    public class Plugin : BaseUnityPlugin
+    {
+        private struct RadarBlip
+        {
+            public Vector3 position;
+            public Color color;
+        }
+
+        private enum RadarMode
+        {
+            All,
+            Specific
+        }
+
+        private RadarMode _currentMode = RadarMode.All; // Default mode
+        private string _currentSpecificResource = "Iron"; // Default specific resource
+
+        static ManualLogSource logger;
+
+        static ConfigEntry<bool> modEnabled;
+        static ConfigEntry<int> radarRange;
+        static ConfigEntry<bool> radarEnabled;
+
+        private const float SCAN_INTERVAL = 2.0f; // Scan every 2 seconds.
+        private float _timeSinceLastScan = 0f;
+
+        static bool oncePerFrame;
+
+        private readonly Dictionary<string, Color> _resourceColors = new Dictionary<string, Color>
+        {
+            { "Iron", Color.grey },
+            { "Cobalt", Color.blue },
+            { "Silicon", new Color(0.8f, 0.7f, 0.6f) }, // Sandy color
+            { "Titanium", Color.white },
+            { "Magnesium", new Color(0.9f, 0.9f, 1f) }, // Pale white
+            { "Aluminium", new Color(0.7f, 0.7f, 0.8f) }, // Dull grey
+            { "Ice", Color.cyan },
+            { "Uranium", Color.green },
+            { "Iridium", new Color(1f, 0.5f, 0f) }, // Orange
+            { "Sulphur", Color.yellow },
+            { "Osmium", new Color(0.6f, 0.2f, 0.8f) }, // Purple
+            { "Zeolite", new Color(0.3f, 0.8f, 0.4f) }, // Dark green
+        };
+        // We now need to store the color along with the position
+        private readonly List<RadarBlip> _blipsToDraw = new List<RadarBlip>();
+
+        private Texture2D _blipTexture;
+        private Rect _radarRect;
+        private float _radarSize = 300f;
+        private Vector2 _radarCenter;
+
+        private void Awake()
+        {
+            // Plugin startup logic
+            modEnabled = Config.Bind("General", "Enabled", true, "Enable or disable the Resource Radar plugin.");
+            radarRange = Config.Bind("Radar", "Range", 100, "Set the range of the resource radar in meters.");
+            radarEnabled = Config.Bind("Radar", "Enabled", true, "Enable or disable the resource radar functionality.");
+
+            Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_NAME} is loaded! Version: {PluginInfo.PLUGIN_VERSION}");
+            Logger.LogInfo($"Mod Enabled: {modEnabled.Value}");
+            Logger.LogInfo($"Radar Range: {radarRange.Value} meters");
+            Logger.LogInfo($"Radar Enabled: {radarEnabled.Value}");
+
+            logger = Logger;
+
+            _blipTexture = new Texture2D(1, 1);
+            _blipTexture.SetPixel(0, 0, Color.white);
+            _blipTexture.Apply();
+
+            Harmony.CreateAndPatchAll(typeof(Plugin), PluginInfo.PLUGIN_GUID);
+        }
+
+        private static bool _isGameReady = false;
+
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(PlanetLoader), "HandleDataAfterLoad")]
+        static void Patch_PlanetLoader_HandleDataAfterLoad(PlanetLoader __instance)
+        {
+            __instance.StartCoroutine(WaitForProceduralInstances(__instance));
+        }
+
+        static System.Collections.IEnumerator WaitForProceduralInstances(PlanetLoader __instance)
+        {
+            while (!__instance.GetIsLoaded())
+            {
+                _isGameReady = false;
+                yield return null; // Wait for the procedural instances to be initialized
+            }
+            // Here you can add logic to handle the procedural instances
+
+
+            logger.LogInfo("Procedural instances are ready.");
+            radarEnabled.Value = true; // Enable radar by default after loading
+
+            _isGameReady = true;
+        }
+
+        void Update()
+        {
+            if (!modEnabled.Value)
+            {
+                return;
+            }
+
+            if (!radarEnabled.Value)
+            {
+                return;
+            }
+
+            _timeSinceLastScan += Time.deltaTime;
+
+            if (_timeSinceLastScan >= SCAN_INTERVAL)
+            {
+                _timeSinceLastScan = 0f;
+                ScanForResources();
+            }
+        }
+
+        void ScanForResources()
+        {
+            var handler = WorldObjectsHandler.Instance;
+
+            if (handler == null)
+            {
+                if (_blipsToDraw.Count > 0)
+                {
+                    _blipsToDraw.Clear();
+                }
+
+                _isGameReady = false;
+
+                return;
+            }
+
+            _blipsToDraw.Clear();
+
+            var allObjects = handler.GetAllWorldObjects();
+
+            foreach (var worldObjectKvp in allObjects)
+            {
+                var worldObject = worldObjectKvp.Value;
+                if (worldObject == null)
+                    continue;
+
+                var groupId = worldObject.GetGroup()?.GetId();
+                if (string.IsNullOrEmpty(groupId))
+                    continue;
+
+                foreach (var targetResource in _resourceColors)
+                {
+                    if (_currentMode == RadarMode.Specific && _currentSpecificResource != targetResource.Key)
+                    {
+                        continue; // Skip if we're in specific mode and this isn't the target resource
+                    }
+
+                    if (groupId.StartsWith(targetResource.Key, System.StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        var objectPosition = worldObject.GetPosition();
+
+                        if (Vector3.Distance(Camera.main.transform.position, objectPosition) <= radarRange.Value)
+                        {
+                            _blipsToDraw.Add(new RadarBlip
+                            {
+                                position = objectPosition,
+                                color = targetResource.Value
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        void OnGUI()
+        {
+            oncePerFrame = !oncePerFrame;
+
+            if (oncePerFrame && Keyboard.current[Key.F5].wasPressedThisFrame)
+            {
+                radarEnabled.Value = !radarEnabled.Value;
+                return;
+            }
+
+            if (oncePerFrame && Keyboard.current[Key.F6].wasPressedThisFrame)
+            {
+                // Cycle to the next mode
+                _currentMode = _currentMode == RadarMode.All ? RadarMode.Specific : RadarMode.All;
+                // Force a rescan immediately to reflect the change
+                ScanForResources();
+                return;
+            }
+
+            if (oncePerFrame && Keyboard.current[Key.F7].wasPressedThisFrame && _currentMode == RadarMode.Specific)
+            {
+                // Cycle through specific resources
+                var resourceKeys = new List<string>(_resourceColors.Keys);
+                int currentIndex = resourceKeys.IndexOf(_currentSpecificResource);
+                currentIndex = (currentIndex + 1) % resourceKeys.Count; // Loop back to the start
+                _currentSpecificResource = resourceKeys[currentIndex];
+                // Force a rescan immediately to reflect the change
+                ScanForResources();
+                return;
+            }
+
+            if (!modEnabled.Value)
+            {
+                return; // Skip GUI rendering if the mod is disabled
+            }
+
+            if (!_isGameReady)
+                return;
+
+            Color originalColor = GUI.color;
+
+            // Define the radar's screen position
+            _radarRect = new Rect(Screen.width - (_radarSize * 1.5f) - 10, Screen.height - (_radarSize * 3) - 10, _radarSize, _radarSize);
+            _radarCenter = new Vector2(_radarRect.x + _radarSize / 2, _radarRect.y + _radarSize / 2);
+
+
+            Camera playerCamera = Camera.main;
+            if (playerCamera == null)
+                return;
+
+            string modeText = $"Mode: {_currentMode} (F6){(_currentMode == RadarMode.Specific ? $" Resource: {_currentSpecificResource} (F7)" : "")}";
+            GUI.color = Color.white;
+            // Position the text just above the radar widget
+            GUI.Label(new Rect(_radarRect.x, _radarRect.y - 20, _radarSize, 20), modeText, new GUIStyle()
+            {
+                fontSize = 14,
+                border = new RectOffset(2, 2, 2, 2),
+                normal = new GUIStyleState { textColor = Color.white }
+            });
+
+            DrawRadarBackground();
+            DrawRadarGrid();
+
+            // Draw the resource blips
+            foreach (var blip in _blipsToDraw)
+            {
+                float distance = Vector3.Distance(playerCamera.transform.position, blip.position);
+
+                // Only process blips within the radar's range
+                if (distance < radarRange.Value)
+                {
+                    DrawBlip(playerCamera.transform, blip.position, blip.color);
+                }
+            }
+
+            // Draw the player blip on top of everything else
+            DrawPlayerBlip();
+
+            GUI.color = originalColor;
+        }
+
+        void DrawRadarBackground()
+        {
+            GUI.color = new Color(0, 0, 0, 0.5f); // Black, 50% transparent
+            GUI.DrawTexture(_radarRect, _blipTexture);
+        }
+
+        void DrawRadarGrid()
+        {
+            GUI.color = new Color(1, 1, 1, 0.3f); // Faint white
+                                                  // Horizontal line
+            GUI.DrawTexture(new Rect(_radarRect.x, _radarCenter.y, _radarSize, 1), _blipTexture);
+            // Vertical line
+            GUI.DrawTexture(new Rect(_radarCenter.x, _radarRect.y, 1, _radarSize), _blipTexture);
+        }
+
+        void DrawPlayerBlip()
+        {
+            // Set the global color for the player blip
+            GUI.color = Color.red;
+            // Use DrawTexture instead of Box
+            GUI.DrawTexture(new Rect(_radarCenter.x - 3, _radarCenter.y - 3, 6, 6), _blipTexture);
+        }
+
+        void DrawBlip(Transform playerTransform, Vector3 resourcePosition, Color blipColor)
+        {
+            // --- This is the core translation logic ---
+
+            // 1. Get the direction vector from the player to the resource
+            Vector3 directionVector = resourcePosition - playerTransform.position;
+
+            // 2. We only care about the X and Z plane for a 2D radar
+            directionVector.y = 0;
+
+            // 3. Get the player's forward direction
+            Vector3 playerForward = playerTransform.forward;
+            playerForward.y = 0;
+
+            // 4. Calculate the angle between the player's forward and the resource direction
+            float angle = Vector3.SignedAngle(playerForward, directionVector, Vector3.up);
+
+            // 5. Convert angle to radians for trigonometric functions
+            float angleRad = angle * Mathf.Deg2Rad;
+
+            // 6. Calculate the resource's distance from the player and scale it to the radar's size
+            float distance = directionVector.magnitude;
+            float scaledDistance = Mathf.Min(distance, radarRange.Value) / radarRange.Value * (_radarSize / 2);
+
+            // 7. Use Sine and Cosine to get the (x, y) coordinates on our radar circle
+            float blipX = _radarCenter.x + (scaledDistance * Mathf.Sin(angleRad));
+            float blipY = _radarCenter.y - (scaledDistance * Mathf.Cos(angleRad)); // Y is inverted in GUI coordinates
+
+            // 8. Draw the blip
+            GUI.color = blipColor;
+            GUI.DrawTexture(new Rect(blipX - 2, blipY - 2, 4, 4), _blipTexture);
+        }
+    }
+}
