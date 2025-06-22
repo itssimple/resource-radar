@@ -3,11 +3,10 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
 using SpaceCraft;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 using UnityEngine;
-using UnityEngine.InputForUI;
 using UnityEngine.InputSystem;
 
 namespace ResourceRadar
@@ -166,12 +165,19 @@ namespace ResourceRadar
             if (_timeSinceLastScan >= SCAN_INTERVAL)
             {
                 _timeSinceLastScan = 0f;
-                ScanForResources();
+                StartCoroutine(ScanForResources());
             }
         }
 
-        void ScanForResources()
+        bool currentlyScanning = false;
+
+        IEnumerator ScanForResources()
         {
+            if (currentlyScanning)
+            {
+                yield break; // Prevent overlapping scans
+            }
+
             var handler = WorldObjectsHandler.Instance;
 
             if (handler == null)
@@ -181,10 +187,14 @@ namespace ResourceRadar
                     _blipsToDraw.Clear();
                 }
 
-                return;
+                currentlyScanning = false;
+
+                yield break;
             }
 
             _blipsToDraw.Clear();
+
+            currentlyScanning = true;
 
             var allObjects = handler.GetAllWorldObjects();
 
@@ -212,7 +222,9 @@ namespace ResourceRadar
                         var objectPosition = worldObject.GetPosition();
 
                         if (!worldObject.GetIsPlaced())
+                        {
                             continue;
+                        }
 
                         _blipsToDraw.Add(new RadarBlip
                         {
@@ -223,6 +235,10 @@ namespace ResourceRadar
                     }
                 }
             }
+
+            currentlyScanning = false;
+
+            yield return null;
         }
 
         void OnGUI()
@@ -240,7 +256,7 @@ namespace ResourceRadar
                 // Cycle to the next mode
                 _currentMode = _currentMode == RadarMode.All ? RadarMode.Specific : RadarMode.All;
                 // Force a rescan immediately to reflect the change
-                ScanForResources();
+                StartCoroutine(ScanForResources());
                 return;
             }
 
@@ -252,7 +268,7 @@ namespace ResourceRadar
                 currentIndex = (currentIndex + 1) % resourceKeys.Count; // Loop back to the start
                 _currentSpecificResource = resourceKeys[currentIndex];
                 // Force a rescan immediately to reflect the change
-                ScanForResources();
+                StartCoroutine(ScanForResources());
                 return;
             }
 
@@ -269,7 +285,7 @@ namespace ResourceRadar
 
                 _currentSpecificResource = resourceKeys[currentIndex];
                 // Force a rescan immediately to reflect the change
-                ScanForResources();
+                StartCoroutine(ScanForResources());
                 return;
             }
 
