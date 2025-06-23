@@ -5,6 +5,7 @@ using HarmonyLib;
 using SpaceCraft;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -173,9 +174,9 @@ namespace ResourceRadar
 
         IEnumerator ScanForResources()
         {
-            if (currentlyScanning)
+            if (!modEnabled.Value || !radarEnabled.Value || currentlyScanning)
             {
-                yield break; // Prevent overlapping scans
+                yield break;
             }
 
             var handler = WorldObjectsHandler.Instance;
@@ -192,16 +193,35 @@ namespace ResourceRadar
                 yield break;
             }
 
-            _blipsToDraw.Clear();
+            Stopwatch totalScanTimer = Stopwatch.StartNew();
+            Stopwatch activeProcessingTimer = new Stopwatch();
+            Stopwatch objectSortTimer = new Stopwatch();
+
+            var tempBlips = new List<RadarBlip>();
 
             currentlyScanning = true;
 
-            var allObjects = handler.GetAllWorldObjects();
+            activeProcessingTimer.Start();
+
+            objectSortTimer.Start();
+
+            var allObjects = handler.GetAllWorldObjects().Values.ToHashSet();
+
+            var playerPosition = Managers.GetManager<PlayersManager>().GetActivePlayerController().transform.position;
+
+            allObjects = [.. allObjects
+                .Where(obj => Vector3.Distance(obj.GetPosition(), playerPosition) < radarRange.Value * 2)
+                .OrderBy(allObjects => Vector3.Distance(allObjects.GetPosition(), playerPosition))
+            ];
+
+            objectSortTimer.Stop();
+
+            int processedCount = 0;
 
             foreach (var worldObjectKvp in allObjects)
             {
-                var worldObject = worldObjectKvp.Value;
-                if (worldObject == null)
+                var worldObject = worldObjectKvp;
+                if (worldObject == null || !worldObject.GetIsPlaced())
                     continue;
 
                 var groupId = worldObject.GetGroup()?.GetId();
@@ -212,31 +232,47 @@ namespace ResourceRadar
                 {
                     if (_currentMode == RadarMode.Specific && _currentSpecificResource != targetResource.Key)
                     {
-                        continue; // Skip if we're in specific mode and this isn't the target resource
+                        continue;
                     }
 
                     var variations = _resourceGroups.GetValueOrDefault(targetResource.Key, []);
 
                     if (variations.Any(v => groupId.StartsWith(v, System.StringComparison.InvariantCultureIgnoreCase)))
                     {
-                        var objectPosition = worldObject.GetPosition();
-
-                        if (!worldObject.GetIsPlaced())
+                        tempBlips.Add(new RadarBlip
                         {
-                            continue;
-                        }
-
-                        _blipsToDraw.Add(new RadarBlip
-                        {
-                            position = objectPosition,
+                            position = worldObject.GetPosition(),
                             color = targetResource.Value
                         });
                         break;
                     }
                 }
+
+                processedCount++;
+
+                if (processedCount >= 500)
+                {
+                    activeProcessingTimer.Stop();
+
+                    processedCount = 0;
+                    yield return null;
+
+                    activeProcessingTimer.Start();
+                }
             }
 
+            activeProcessingTimer.Stop();
+
+            _blipsToDraw.Clear();
+            _blipsToDraw.AddRange(tempBlips);
+
             currentlyScanning = false;
+
+            totalScanTimer.Stop();
+
+            //Logger.LogInfo($"Resource scan completed in {totalScanTimer.ElapsedMilliseconds} ms. Found {_blipsToDraw.Count} resources amongst {allObjects.Count}.");
+            //Logger.LogInfo($"Active processing time: {activeProcessingTimer.ElapsedMilliseconds} ms. Average per blip: {(activeProcessingTimer.ElapsedMilliseconds / (float)_blipsToDraw.Count):F2} ms.");
+            //Logger.LogInfo($"Object sorting time: {objectSortTimer.ElapsedMilliseconds} ms. Average per object: {(objectSortTimer.ElapsedMilliseconds / (float)allObjects.Count):F2} ms.");
 
             yield return null;
         }
