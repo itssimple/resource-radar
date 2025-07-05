@@ -5,128 +5,171 @@ using HarmonyLib;
 using SpaceCraft;
 using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
-using UnityEngine;
-using UnityEngine.InputSystem;
+using Unity.Netcode;
 
 namespace ResourceRadar
 {
     [BepInPlugin("nolifeking85.theplanetcraftermods.featresourceradar", "(Feat) Resource Radar", PluginInfo.PLUGIN_VERSION)]
     public class Plugin : BaseUnityPlugin
     {
-        private struct RadarBlip
-        {
-            public Vector3 position;
-            public Color color;
-        }
-
-        private enum RadarMode
-        {
-            All,
-            Specific
-        }
-
-        private RadarMode _currentMode = RadarMode.All; // Default mode
-        private string _currentSpecificResource = "Iron"; // Default specific resource
+        public static ConfigEntry<bool> modEnabled;
+        public static ConfigEntry<bool> radarEnabled;
 
         static ManualLogSource logger;
 
-        static ConfigEntry<bool> modEnabled;
-        static ConfigEntry<int> radarRange;
-        static ConfigEntry<bool> radarEnabled;
+        static readonly string[] radarItems = ["ResourceRadar-Tier1", "ResourceRadar-Tier2", "ResourceRadar-Tier3"];
 
-        private const float SCAN_INTERVAL = 2.0f; // Scan every 2 seconds.
-        private float _timeSinceLastScan = 0f;
+        public static bool hasRadarEquipped = false;
+        public static WorldObject currentRadarObject = null;
 
-        static bool oncePerFrame;
-
-        private readonly Dictionary<string, Color> _resourceColors = new Dictionary<string, Color>
-        {
-            { "Aluminium", new Color(0.7f, 0.7f, 0.8f) }, // Dull grey
-            { "Bauxite", new Color(0.769f, 0.271f, 0) },
-            { "Blazar Quartz", new Color(0, 0.678f, 1) },
-            { "Cobalt", Color.blue },
-            { "Cosmic Quartz", new Color(1, 0, 0.561f) },
-            { "Dolomite", new Color(0.859f, 0.859f, 0.859f) },
-            { "Ice", Color.cyan },
-            { "Iridium", new Color(1f, 0.5f, 0f) }, // Orange
-            { "Iron", Color.grey },
-            { "Magnesium", new Color(0.9f, 0.9f, 1f) }, // Pale white
-            { "Magnetar Quartz", new Color(0.643f, 0, 1) },
-            { "Obsidian", new Color(0.412f, 0, 0.318f) },
-            { "Osmium", new Color(0.6f, 0.2f, 0.8f) }, // Purple
-            { "Phosphorus", new Color(0.69f, 0.957f, 1f) },
-            { "Pulsar Quartz", new Color(1f, 0f, 1f) },
-            { "Pulsar Shard", new Color(1f, 0f, 1f) },
-            { "Quasar Quartz", new Color(0, 1, 0.259f) },
-            { "Selenium", new Color(0.294f, 0.459f, 0.369f) },
-            { "Silicon", new Color(0.8f, 0.7f, 0.6f) }, // Sandy color
-            { "Solar Quartz", new Color(0.988f, 1f, 0f) },
-            { "Sulphur", Color.yellow },
-            { "Super Alloy", new Color(0.7f, 0, 1f) },
-            { "Titanium", Color.white },
-            { "Uranium", Color.green },
-            { "Uraninite", new Color(0.929f, 1, 0.949f) },
-            { "Zeolite", new Color(0.3f, 0.8f, 0.4f) }, // Dark green
-        };
-
-        private readonly Dictionary<string, List<string>> _resourceGroups = new Dictionary<string, List<string>>
-        {
-            { "Aluminium", new List<string> { "Aluminium" } },
-            { "Bauxite", new List<string> { "Bauxite" } },
-            { "Blazar Quartz", new List<string> { "BlazarQuartz", "BalzarQuartz" } },
-            { "Cobalt", new List<string> { "Cobalt" } },
-            { "Cosmic Quartz", new List<string> { "CosmicQuartz" } },
-            { "Dolomite", new List<string> { "Dolomite" } },
-            { "Ice", new List<string> { "Ice" } },
-            { "Iridium", new List<string> { "Iridium" } },
-            { "Iron", new List<string> { "Iron" } },
-            { "Magnesium", new List<string> { "Magnesium" } },
-            { "Magnetar Quartz", new List<string> { "MagnetarQuartz" } },
-            { "Obsidian", new List<string> { "Obsidian" } },
-            { "Osmium", new List<string> { "Osmium" } },
-            { "Phosphorus", new List<string> { "Phosphorus" } },
-            { "Pulsar Quartz", new List<string> { "PulsarQuartz" } },
-            { "Pulsar Shard", new List<string> { "PulsarShard" } },
-            { "Quasar Quartz", new List<string> { "QuasarQuartz" } },
-            { "Selenium", new List<string> { "Selenium" } },
-            { "Silicon", new List<string> { "Silicon" } },
-            { "Solar Quartz", new List<string> { "SolarQuartz" } },
-            { "Sulphur", new List<string> { "Sulphur", "Sulfur" } },
-            { "Super Alloy", new List<string> { "SuperAlloy", "Alloy" } },
-            { "Titanium", new List<string> { "Titanium" } },
-            { "Uranium", new List<string> { "Uranium", "Uranim" } },
-            { "Uraninite", new List<string> { "Uraninite" } },
-            { "Zeolite", new List<string> { "Zeolite" } }
-        };
-
-        private readonly List<RadarBlip> _blipsToDraw = new List<RadarBlip>();
-
-        private Texture2D _blipTexture;
-        private Rect _radarRect;
-        private float _radarSize = 300f;
-        private Vector2 _radarCenter;
+        public static List<GroupDataItem> radarTierItems = new List<GroupDataItem>();
 
         private void Awake()
         {
             // Plugin startup logic
             modEnabled = Config.Bind("General", "Enabled", true, "Enable or disable the Resource Radar plugin.");
-            radarRange = Config.Bind("Radar", "Range", 100, "Set the range of the resource radar in meters.");
             radarEnabled = Config.Bind("Radar", "Enabled", true, "Enable or disable the resource radar functionality.");
 
             Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_NAME} is loaded! Version: {PluginInfo.PLUGIN_VERSION}");
             Logger.LogInfo($"Mod Enabled: {modEnabled.Value}");
-            Logger.LogInfo($"Radar Range: {radarRange.Value} meters");
             Logger.LogInfo($"Radar Enabled: {radarEnabled.Value}");
 
             logger = Logger;
 
-            _blipTexture = new Texture2D(1, 1);
-            _blipTexture.SetPixel(0, 0, Color.white);
-            _blipTexture.Apply();
-
             Harmony.CreateAndPatchAll(typeof(Plugin), PluginInfo.PLUGIN_GUID);
+        }
+
+        private static GroupDataItem CreateRadarTierItem(List<GroupData> ___groupsData, string id)
+        {
+            var compassItem = (GroupDataItem)___groupsData.Find((GroupData g) => g.id == "HudCompass");
+
+            if (compassItem == null)
+            {
+                logger.LogError("HudCompass item not found in groups data. Cannot create ResourceRadarTier1 item.");
+                return null;
+            }
+
+            var resourceRadarItem = Instantiate(compassItem);
+
+            resourceRadarItem.id = id;
+            resourceRadarItem.name = id;
+            resourceRadarItem.craftableInList = [DataConfig.CraftableIn.CraftStationT2];
+            resourceRadarItem.equipableType = (DataConfig.EquipableType)1000;
+            resourceRadarItem.cantBeDestroyed = true;
+            resourceRadarItem.cantBeRecycled = true;
+
+            switch (id)
+            {
+                case "ResourceRadar-Tier1":
+                    resourceRadarItem.recipeIngredients =
+                        GetRadarRecipe(
+                            ___groupsData,
+                            new Dictionary<string, int>
+                            {
+                                { "HudCompass", 1 },
+                                { "Iron", 2 }
+                            });
+                    resourceRadarItem.value = 1;
+                    break;
+                case "ResourceRadar-Tier2":
+                    resourceRadarItem.recipeIngredients =
+                        GetRadarRecipe(
+                            ___groupsData,
+                            new Dictionary<string, int>
+                            {
+                                { "ResourceRadar-Tier1", 1 },
+                                { "Cobalt", 1 },
+                                { "Osmium", 1 }
+                            });
+                    resourceRadarItem.value = 2;
+                    break;
+                case "ResourceRadar-Tier3":
+                    resourceRadarItem.recipeIngredients =
+                        GetRadarRecipe(
+                            ___groupsData,
+                            new Dictionary<string, int>
+                            {
+                                { "ResourceRadar-Tier2", 1 },
+                                { "PulsarQuartz", 1 },
+                                { "SolarQuartz", 1 }
+                            });
+                    resourceRadarItem.value = 3;
+                    break;
+                default:
+                    logger.LogError($"Unknown radar item ID: {id}");
+                    return null;
+            }
+
+            return resourceRadarItem;
+        }
+
+        private static List<GroupDataItem> GetRadarRecipe(List<GroupData> dataItems, Dictionary<string, int> requiredItems)
+        {
+            var recipe = new List<GroupDataItem>();
+
+            foreach (var requiredItem in requiredItems)
+            {
+                var requiredDataItem = (GroupDataItem)dataItems.Find((GroupData g) => g.id == requiredItem.Key);
+                if (requiredDataItem != null)
+                {
+                    for (var i = 0; i < requiredItem.Value; i++)
+                    {
+                        recipe.Add(Instantiate(requiredDataItem));
+                    }
+                }
+                else
+                {
+                    logger.LogError($"Required item {requiredItem.Key} not found in data items.");
+                }
+            }
+            return recipe;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(StaticDataHandler), "LoadStaticData")]
+        private static void StaticDataHandler_LoadStaticData(List<GroupData> ___groupsData)
+        {
+            for (var i = ___groupsData.Count - 1; i >= 0; i--)
+            {
+                var groupData = ___groupsData[i];
+                if (groupData == null || (groupData.associatedGameObject == null && groupData.id.StartsWith("ResourceRadar-")))
+                {
+                    ___groupsData.RemoveAt(i);
+                }
+            }
+
+            var existingGroups = ___groupsData.Select(groupData => groupData.id).ToHashSet();
+
+            foreach (var radarItem in radarItems)
+            {
+                if (!existingGroups.Contains(radarItem))
+                {
+                    logger.LogInfo($"Creating {radarItem} item in groups data.");
+                    var newItem = CreateRadarTierItem(___groupsData, radarItem);
+                    if (newItem != null)
+                    {
+                        ___groupsData.Add(newItem);
+                        radarTierItems.Add(newItem);
+                    }
+                }
+                else
+                {
+                    logger.LogWarning($"{radarItem} item already exists in groups data. Skipping creation.");
+                }
+            }
+        }
+
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(UnlockedGroupsHandler), "SetUnlockedGroups")]
+        private static void UnlockedGroupsHandler_SetUnlockedGroups(NetworkList<int> ____unlockedGroups)
+        {
+            foreach (string text in radarItems)
+            {
+                Group groupViaId = GroupsHandler.GetGroupViaId(text);
+                logger.LogInfo("Unlocking " + text);
+                ____unlockedGroups.Add(groupViaId.stableHashCode);
+            }
         }
 
         [HarmonyPostfix]
@@ -136,7 +179,7 @@ namespace ResourceRadar
             __instance.StartCoroutine(WaitForProceduralInstances(__instance));
         }
 
-        static System.Collections.IEnumerator WaitForProceduralInstances(PlanetLoader __instance)
+        static IEnumerator WaitForProceduralInstances(PlanetLoader __instance)
         {
             while (!__instance.GetIsLoaded())
             {
@@ -147,6 +190,77 @@ namespace ResourceRadar
 
             logger.LogInfo("Procedural instances are ready.");
             radarEnabled.Value = true; // Enable radar by default after loading
+        }
+
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(Localization), "LoadLocalization")]
+        private static void Localization_LoadLocalization(Dictionary<string, Dictionary<string, string>> ___localizationDictionary)
+        {
+            if (___localizationDictionary.TryGetValue("english", out var dictionary))
+            {
+                foreach (string text in radarItems)
+                {
+                    switch (text)
+                    {
+                        case "ResourceRadar-Tier1":
+                            dictionary["GROUP_NAME_" + text] = "Resource Radar T1";
+                            dictionary["GROUP_DESC_" + text] = "A basic radar for detecting resources in the vicinity.";
+                            break;
+                        case "ResourceRadar-Tier2":
+                            dictionary["GROUP_NAME_" + text] = "Resource Radar T2";
+                            dictionary["GROUP_DESC_" + text] = "A slightly better radar for detecting resources in the vicinity.";
+                            break;
+                        case "ResourceRadar-Tier3":
+                            dictionary["GROUP_NAME_" + text] = "Resource Radar T3";
+                            dictionary["GROUP_DESC_" + text] = "The best radar for detecting resources in the vicinity.";
+                            break;
+                        default:
+                            logger.LogError($"Unknown radar item: {text}");
+                            continue;
+                    }
+                }
+            }
+        }
+
+        private static RadarEffectComponent _radarEffectComponent;
+
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(PlayerEquipment), "UpdateAfterEquipmentChange")]
+        private static void PlayerEquipment_UpdateAfterEquipmentChange(PlayerEquipment __instance, WorldObject worldObject, bool hasBeenAdded, bool isFirstInit)
+        {
+            if (worldObject != null && worldObject.GetGroup() != null)
+            {
+                var groupItem = (GroupItem)worldObject.GetGroup();
+
+                if (worldObject.GetGroup().GetId().StartsWith("ResourceRadar"))
+                {
+                    hasRadarEquipped = hasBeenAdded;
+
+                    if (hasBeenAdded)
+                    {
+                        currentRadarObject = worldObject;
+
+                        if (_radarEffectComponent == null)
+                        {
+                            _radarEffectComponent = __instance.GetComponent<RadarEffectComponent>();
+
+                            if (_radarEffectComponent == null)
+                            {
+                                _radarEffectComponent = __instance.gameObject.AddComponent<RadarEffectComponent>();
+                            }
+                        }
+                    }
+                    else
+                    {
+                        currentRadarObject = null;
+                        if (_radarEffectComponent != null)
+                        {
+                            Destroy(_radarEffectComponent);
+                            _radarEffectComponent = null;
+                        }
+                    }
+                }
+            }
         }
 
         void Update()
@@ -161,273 +275,7 @@ namespace ResourceRadar
                 return;
             }
 
-            _timeSinceLastScan += Time.deltaTime;
 
-            if (_timeSinceLastScan >= SCAN_INTERVAL)
-            {
-                _timeSinceLastScan = 0f;
-                StartCoroutine(ScanForResources());
-            }
-        }
-
-        bool currentlyScanning = false;
-
-        IEnumerator ScanForResources()
-        {
-            if (!modEnabled.Value || !radarEnabled.Value || currentlyScanning)
-            {
-                yield break;
-            }
-
-            var handler = WorldObjectsHandler.Instance;
-
-            if (handler == null)
-            {
-                if (_blipsToDraw.Count > 0)
-                {
-                    _blipsToDraw.Clear();
-                }
-
-                currentlyScanning = false;
-
-                yield break;
-            }
-
-            Stopwatch totalScanTimer = Stopwatch.StartNew();
-            Stopwatch activeProcessingTimer = new Stopwatch();
-            Stopwatch objectSortTimer = new Stopwatch();
-
-            var tempBlips = new List<RadarBlip>();
-
-            currentlyScanning = true;
-
-            activeProcessingTimer.Start();
-
-            objectSortTimer.Start();
-
-            var allObjects = handler.GetAllWorldObjects().Values.ToHashSet();
-
-            var playerPosition = Managers.GetManager<PlayersManager>().GetActivePlayerController().transform.position;
-
-            allObjects = [.. allObjects
-                .Where(obj => Vector3.Distance(obj.GetPosition(), playerPosition) < radarRange.Value * 2)
-                .OrderBy(allObjects => Vector3.Distance(allObjects.GetPosition(), playerPosition))
-            ];
-
-            objectSortTimer.Stop();
-
-            int processedCount = 0;
-
-            foreach (var worldObjectKvp in allObjects)
-            {
-                var worldObject = worldObjectKvp;
-                if (worldObject == null || !worldObject.GetIsPlaced())
-                    continue;
-
-                var groupId = worldObject.GetGroup()?.GetId();
-                if (string.IsNullOrEmpty(groupId))
-                    continue;
-
-                foreach (var targetResource in _resourceColors)
-                {
-                    if (_currentMode == RadarMode.Specific && _currentSpecificResource != targetResource.Key)
-                    {
-                        continue;
-                    }
-
-                    var variations = _resourceGroups.GetValueOrDefault(targetResource.Key, []);
-
-                    if (variations.Any(v => groupId.StartsWith(v, System.StringComparison.InvariantCultureIgnoreCase)))
-                    {
-                        tempBlips.Add(new RadarBlip
-                        {
-                            position = worldObject.GetPosition(),
-                            color = targetResource.Value
-                        });
-                        break;
-                    }
-                }
-
-                processedCount++;
-
-                if (processedCount >= 500)
-                {
-                    activeProcessingTimer.Stop();
-
-                    processedCount = 0;
-                    yield return null;
-
-                    activeProcessingTimer.Start();
-                }
-            }
-
-            activeProcessingTimer.Stop();
-
-            _blipsToDraw.Clear();
-            _blipsToDraw.AddRange(tempBlips);
-
-            currentlyScanning = false;
-
-            totalScanTimer.Stop();
-
-            //Logger.LogInfo($"Resource scan completed in {totalScanTimer.ElapsedMilliseconds} ms. Found {_blipsToDraw.Count} resources amongst {allObjects.Count}.");
-            //Logger.LogInfo($"Active processing time: {activeProcessingTimer.ElapsedMilliseconds} ms. Average per blip: {(activeProcessingTimer.ElapsedMilliseconds / (float)_blipsToDraw.Count):F2} ms.");
-            //Logger.LogInfo($"Object sorting time: {objectSortTimer.ElapsedMilliseconds} ms. Average per object: {(objectSortTimer.ElapsedMilliseconds / (float)allObjects.Count):F2} ms.");
-
-            yield return null;
-        }
-
-        void OnGUI()
-        {
-            oncePerFrame = !oncePerFrame;
-
-            if (oncePerFrame && Keyboard.current[Key.F5].wasPressedThisFrame)
-            {
-                radarEnabled.Value = !radarEnabled.Value;
-                return;
-            }
-
-            if (oncePerFrame && Keyboard.current[Key.F6].wasPressedThisFrame)
-            {
-                // Cycle to the next mode
-                _currentMode = _currentMode == RadarMode.All ? RadarMode.Specific : RadarMode.All;
-                // Force a rescan immediately to reflect the change
-                StartCoroutine(ScanForResources());
-                return;
-            }
-
-            if (oncePerFrame && Keyboard.current[Key.PageDown].wasPressedThisFrame && _currentMode == RadarMode.Specific)
-            {
-                // Cycle through specific resources
-                var resourceKeys = new List<string>(_resourceColors.Keys);
-                int currentIndex = resourceKeys.IndexOf(_currentSpecificResource);
-                currentIndex = (currentIndex + 1) % resourceKeys.Count; // Loop back to the start
-                _currentSpecificResource = resourceKeys[currentIndex];
-                // Force a rescan immediately to reflect the change
-                StartCoroutine(ScanForResources());
-                return;
-            }
-
-            if (oncePerFrame && Keyboard.current[Key.PageUp].wasPressedThisFrame && _currentMode == RadarMode.Specific)
-            {
-                // Cycle through specific resources
-                var resourceKeys = new List<string>(_resourceColors.Keys);
-                int currentIndex = resourceKeys.IndexOf(_currentSpecificResource);
-                currentIndex--;
-                if (currentIndex < 0)
-                {
-                    currentIndex = resourceKeys.Count - 1;
-                }
-
-                _currentSpecificResource = resourceKeys[currentIndex];
-                // Force a rescan immediately to reflect the change
-                StartCoroutine(ScanForResources());
-                return;
-            }
-
-            if (!modEnabled.Value)
-            {
-                return; // Skip GUI rendering if the mod is disabled
-            }
-
-            Color originalColor = GUI.color;
-
-            // Define the radar's screen position
-            _radarRect = new Rect(Screen.width - (_radarSize * 1.5f) - 10, Screen.height - (_radarSize * 3) - 10, _radarSize, _radarSize);
-            _radarCenter = new Vector2(_radarRect.x + _radarSize / 2, _radarRect.y + _radarSize / 2);
-
-            var player = Managers.GetManager<PlayersManager>()?.GetActivePlayerController();
-            if (player == null || !radarEnabled.Value)
-            {
-                return; // Skip rendering if player is not available or radar is disabled
-            }
-
-            string modeText = $"Mode: {_currentMode} (F6){(_currentMode == RadarMode.Specific ? $" Resource: {_currentSpecificResource} (PgUp/PgDn)" : "")}";
-            // , Last update: {_timeSinceLastScan} seconds ago
-            GUI.color = Color.white;
-            // Position the text just above the radar widget
-            GUI.Label(new Rect(_radarRect.x, _radarRect.y - 20, _radarSize, 20), modeText, new GUIStyle()
-            {
-                fontSize = 14,
-                border = new RectOffset(2, 2, 2, 2),
-                normal = new GUIStyleState { textColor = Color.white }
-            });
-
-            DrawRadarBackground();
-            DrawRadarGrid();
-
-            // Draw the resource blips
-            foreach (var blip in _blipsToDraw)
-            {
-                float distance = Vector3.Distance(player.transform.position, blip.position);
-
-                // Only process blips within the radar's range
-                if (distance < radarRange.Value)
-                {
-                    DrawBlip(player.transform, blip.position, blip.color);
-                }
-            }
-
-            // Draw the player blip on top of everything else
-            DrawPlayerBlip();
-
-            GUI.color = originalColor;
-        }
-
-        void DrawRadarBackground()
-        {
-            GUI.color = new Color(0, 0, 0, 0.5f); // Black, 50% transparent
-            GUI.DrawTexture(_radarRect, _blipTexture);
-        }
-
-        void DrawRadarGrid()
-        {
-            GUI.color = new Color(1, 1, 1, 0.3f); // Faint white
-            // Horizontal line
-            GUI.DrawTexture(new Rect(_radarRect.x, _radarCenter.y, _radarSize, 1), _blipTexture);
-            // Vertical line
-            GUI.DrawTexture(new Rect(_radarCenter.x, _radarRect.y, 1, _radarSize), _blipTexture);
-        }
-
-        void DrawPlayerBlip()
-        {
-            // Set the global color for the player blip
-            GUI.color = Color.red;
-            // Use DrawTexture instead of Box
-            GUI.DrawTexture(new Rect(_radarCenter.x - 3, _radarCenter.y - 3, 6, 6), _blipTexture);
-        }
-
-        void DrawBlip(Transform playerTransform, Vector3 resourcePosition, Color blipColor)
-        {
-            // --- This is the core translation logic ---
-
-            // 1. Get the direction vector from the player to the resource
-            Vector3 directionVector = resourcePosition - playerTransform.position;
-
-            // 2. We only care about the X and Z plane for a 2D radar
-            directionVector.y = 0;
-
-            // 3. Get the player's forward direction
-            Vector3 playerForward = playerTransform.forward;
-            playerForward.y = 0;
-
-            // 4. Calculate the angle between the player's forward and the resource direction
-            float angle = Vector3.SignedAngle(playerForward, directionVector, Vector3.up);
-
-            // 5. Convert angle to radians for trigonometric functions
-            float angleRad = angle * Mathf.Deg2Rad;
-
-            // 6. Calculate the resource's distance from the player and scale it to the radar's size
-            float distance = directionVector.magnitude;
-            float scaledDistance = Mathf.Min(distance, radarRange.Value) / radarRange.Value * (_radarSize / 2);
-
-            // 7. Use Sine and Cosine to get the (x, y) coordinates on our radar circle
-            float blipX = _radarCenter.x + (scaledDistance * Mathf.Sin(angleRad));
-            float blipY = _radarCenter.y - (scaledDistance * Mathf.Cos(angleRad)); // Y is inverted in GUI coordinates
-
-            // 8. Draw the blip
-            GUI.color = blipColor;
-            GUI.DrawTexture(new Rect(blipX - 2, blipY - 2, 4, 4), _blipTexture);
         }
     }
 }
