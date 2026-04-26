@@ -10,7 +10,7 @@ using Unity.Netcode;
 
 namespace ResourceRadar
 {
-    [BepInPlugin("nolifeking85.theplanetcraftermods.featresourceradar", "(Feat) Resource Radar", PluginInfo.PLUGIN_VERSION)]
+    [BepInPlugin(ModInfo.Guid, ModInfo.ModName, ModInfo.Version)]
     public class Plugin : BaseUnityPlugin
     {
         public static ConfigEntry<bool> modEnabled;
@@ -31,13 +31,13 @@ namespace ResourceRadar
             modEnabled = Config.Bind("General", "Enabled", true, "Enable or disable the Resource Radar plugin.");
             radarEnabled = Config.Bind("Radar", "Enabled", true, "Enable or disable the resource radar functionality.");
 
-            Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_NAME} is loaded! Version: {PluginInfo.PLUGIN_VERSION}");
+            Logger.LogInfo($"Plugin {ModInfo.ModName} is loaded! Version: {ModInfo.Version}");
             Logger.LogInfo($"Mod Enabled: {modEnabled.Value}");
             Logger.LogInfo($"Radar Enabled: {radarEnabled.Value}");
 
             logger = Logger;
 
-            Harmony.CreateAndPatchAll(typeof(Plugin), PluginInfo.PLUGIN_GUID);
+            Harmony.CreateAndPatchAll(typeof(Plugin), ModInfo.Guid);
         }
 
         private static GroupDataItem CreateRadarTierItem(List<GroupData> ___groupsData, string id)
